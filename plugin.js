@@ -287,3 +287,12 @@ export async function search(query) {
   );
   return ((d.Page && d.Page.media) || []).map(itemAnime);
 }
+
+// ---------- Reproducción ----------
+
+// Las fichas de AniFeed son informativas (horarios y noticias): no hay
+// video. Al tocar "ver" se explica amablemente en lugar de fallar raro.
+export async function resolve(ref) {
+  await null;
+  throw kino.error("not_found", "sin video", { userMessage: "Esta ficha es informativa, no tiene video." });
+}
