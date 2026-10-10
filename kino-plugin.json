@@ -1,7 +1,7 @@
 {
   "id": "anifeed",
   "name": "AniFeed — Noticias y Calendario",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "apiVersion": 6,
   "entry": "plugin.js",
   "icon": "icon.png",
