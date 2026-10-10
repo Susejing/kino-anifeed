@@ -1,12 +1,12 @@
 {
   "id": "anifeed",
   "name": "AniFeed — Noticias y Calendario",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "apiVersion": 6,
   "entry": "plugin.js",
   "icon": "icon.png",
   "description": "Noticias de anime y calendario de emisión semanal con horarios por día, tendencias y próximos estrenos, directo en Kino.",
-  "hosts": ["graphql.anilist.co", "myanimelist.net"],
+  "hosts": ["graphql.anilist.co", "myanimelist.net", "translate.googleapis.com"],
   "capabilities": ["resolve", "search", "home", "browse"],
   "categories": ["anime"],
   "settings": [
