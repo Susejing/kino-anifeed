@@ -3,7 +3,7 @@
 // emisión, tendencias y próximos estrenos). No necesita tokens ni claves.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 
 // ---------- utilidades ----------
 
@@ -162,6 +162,24 @@ async function traducirSeguro(texto) {
   try { return await traducir(texto); } catch (e) { return texto; }
 }
 
+// Traduce textos largos por trozos (500 caracteres) en paralelo y los une.
+async function traducirLargo(texto) {
+  await null;
+  const partes = [];
+  let resto = String(texto || "");
+  while (resto.length > 0) {
+    let trozo = resto.slice(0, 500);
+    resto = resto.slice(500);
+    if (resto.length > 0 && resto[0] !== " ") {
+      const corte = trozo.lastIndexOf(" ");
+      if (corte > 200) { resto = trozo.slice(corte + 1) + resto; trozo = trozo.slice(0, corte); }
+    }
+    partes.push(trozo);
+  }
+  const traducidos = await Promise.all(partes.map((p) => traducirSeguro(p)));
+  return traducidos.join(" ");
+}
+
 function haceCuanto(fechaRSS) {
   const t = Date.parse(fechaRSS);
   if (isNaN(t)) return "nuevo";
@@ -201,18 +219,38 @@ async function noticias() {
   for (let i = 0; i < brutas.length; i++) {
     const b = brutas[i];
     const traducida = b.tituloEs !== b.titulo;
+    const nid = b.guid.replace(/\D+/g, "") || String(i);
+    // El resumen ya traducido se guarda para el respaldo del artículo completo.
+    try { kino.storage.set("notresumen-es:" + nid, b.descEs || b.desc || "", 172800000); } catch (e2) { /* cache llena */ }
     items.push({
-      id: "not-" + (b.guid.replace(/\D+/g, "") || String(i)),
-      ref: "noticia:" + i,
+      id: "not-" + nid,
+      ref: "noticia:" + nid,
       title: b.tituloEs,
-      kind: "movie",
+      kind: "series",
       poster: b.thumb.indexOf("https://") === 0 ? b.thumb : undefined,
-      overview: (b.descEs ? "📰 " + b.descEs : "Sin resumen.") + "\n\n🌐 Leer completa:\n" + b.link +
+      overview: (b.descEs ? "📰 " + b.descEs : "Sin resumen.") +
+        "\n\n📖 Abre «📰 Leer la noticia completa» para todo el artículo." +
         "\n\nFuente: MyAnimeList News" + (traducida ? " · traducción automática" : ""),
       badges: [haceCuanto(b.fecha)]
     });
   }
   return items;
+}
+
+// Extrae el texto del artículo completo de la página de la noticia en MAL.
+// Solo párrafos largos, sin basura de cookies, avisos o pie de página.
+function extraerArticulo(html) {
+  const paras = [];
+  const re = /<p[^>]*>([\s\S]*?)<\/p>/g;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const t = limpiarHTML(m[1]);
+    if (!t || t.length < 60) continue;
+    if (t.indexOf("cookie") >= 0 || t.indexOf("privacy") >= 0 || t.indexOf("consent") >= 0 ||
+        t.indexOf("Terms of Service") >= 0 || t.indexOf("advertis") >= 0) continue;
+    paras.push(t);
+  }
+  return paras.join("\n\n").slice(0, 6000);
 }
 
 // ---------- Categorías (las pestañas de días, como en la app de la captura) ----------
@@ -331,6 +369,47 @@ export async function search(query) {
     { s: query.q }
   );
   return ((d.Page && d.Page.media) || []).map(itemAnime);
+}
+
+// ---------- Episodios: la noticia completa ----------
+
+// Al abrir una noticia, Kino pide sus episodios: el único episodio es
+// «📰 Leer la noticia completa», con el artículo entero traducido (bajo
+// demanda, solo para la noticia que la persona abre, con caché).
+export async function episodes(ref) {
+  await null;
+  if (ref.indexOf("noticia:") === 0) {
+    const nid = ref.slice(8);
+    const url = "https://myanimelist.net/news/" + nid.replace(/\D+/g, "");
+    let texto = kino.storage.get("notart-es:" + nid);
+    if (!texto) {
+      let cuerpo = "";
+      let espanol = false;
+      try {
+        const html = await fetchTexto(url);
+        cuerpo = extraerArticulo(html);
+      } catch (e) {
+        kino.log("episodios: artículo falló:", e.code || e.message);
+      }
+      if (cuerpo.length < 300) {
+        // Respaldo: el resumen ya traducido que se guardó al listar noticias.
+        cuerpo = kino.storage.get("notresumen-es:" + nid) || "No se pudo cargar la noticia.";
+        espanol = true;
+      }
+      texto = espanol ? cuerpo : await traducirLargo(cuerpo);
+      try { kino.storage.set("notart-es:" + nid, texto, 172800000); } catch (e2) { /* cache llena */ }
+    }
+    return {
+      episodes: [{
+        season: 1,
+        number: 1,
+        ref: "notexto:" + nid,
+        title: "📰 Leer la noticia completa",
+        overview: texto + "\n\n🌐 Fuente:\n" + url + "\n\nFuente: MyAnimeList News · traducción automática"
+      }]
+    };
+  }
+  return { episodes: [] };
 }
 
 // ---------- Reproducción ----------
