@@ -3,7 +3,7 @@
 // emisión, tendencias y próximos estrenos). No necesita tokens ni claves.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 
 // ---------- utilidades ----------
 
@@ -49,10 +49,12 @@ function horaLocal(seg) {
   return ("0" + t.getUTCHours()).slice(-2) + ":" + ("0" + t.getUTCMinutes()).slice(-2);
 }
 
+const DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+
 function fechaLocal(seg) {
   const t = new Date((seg + offsetUTC() * 3600) * 1000);
   const meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
-  return t.getUTCDate() + " " + meses[t.getUTCMonth()];
+  return DIAS[t.getUTCDay()] + " " + t.getUTCDate() + " " + meses[t.getUTCMonth()];
 }
 
 // Inicio (medianoche) del día local de hoy + desplazamiento, en segundos UTC.
@@ -111,7 +113,7 @@ function itemAnime(m) {
     kind: "movie",
     year: m.startDate && m.startDate.year ? m.startDate.year : undefined,
     poster: m.coverImage && m.coverImage.extraLarge ? m.coverImage.extraLarge : undefined,
-    overview: limpiarHTML(m.description).slice(0, 900) || "Sin descripción.",
+    overview: "Sinopsis:\n" + (limpiarHTML(m.description).slice(0, 900) || "Sin descripción."),
     genres: (m.genres || []).slice(0, 5),
     rating: m.averageScore ? Math.round(m.averageScore) / 10 : undefined
   };
@@ -121,13 +123,44 @@ function itemAnime(m) {
 function itemEmision(e) {
   const base = itemAnime(e.media);
   base.badges = ["Ep " + e.episode, horaLocal(e.airingAt)];
-  base.overview = "Episodio " + e.episode + " se emite el " + fechaLocal(e.airingAt) +
+  base.overview = "📺 Episodio " + e.episode + " se emite el " + fechaLocal(e.airingAt) +
     " a las " + horaLocal(e.airingAt) + " (UTC" + (offsetUTC() >= 0 ? "+" : "") + offsetUTC() + ").\n\n" +
-    (base.overview || "");
+    base.overview;
   return base;
 }
 
-// ---------- Noticias de MyAnimeList (RSS) ----------
+// ---------- Noticias de MyAnimeList (RSS), traducidas al español ----------
+
+// Traducción gratuita (Google, endpoint público). Con caché en storage para
+// no repetir ni saturar: cada texto se traduce una vez y queda guardado.
+function hashCorto(s) {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = (((h << 5) + h) + s.charCodeAt(i)) & 0x7fffffff;
+  return h.toString(36);
+}
+
+async function traducir(texto) {
+  await null;
+  if (!texto) return "";
+  const clave = "tr:" + hashCorto(texto);
+  const cache = kino.storage.get(clave);
+  if (cache) return cache;
+  const r = await fetchJson("https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=es&dt=t&q=" + encodeURIComponent(texto.slice(0, 500)), {});
+  const partes = (r && r[0]) || [];
+  let salida = "";
+  for (let i = 0; i < partes.length; i++) {
+    if (partes[i] && partes[i][0]) salida += partes[i][0];
+  }
+  if (!salida) throw new Error("sin traducción");
+  try { kino.storage.set(clave, salida, 2000000000); } catch (e2) { /* cache lleno */ }
+  return salida;
+}
+
+// Traduce y si algo falla devuelve el original (nunca rompe la fila).
+async function traducirSeguro(texto) {
+  await null;
+  try { return await traducir(texto); } catch (e) { return texto; }
+}
 
 function haceCuanto(fechaRSS) {
   const t = Date.parse(fechaRSS);
@@ -141,7 +174,7 @@ function haceCuanto(fechaRSS) {
 async function noticias() {
   await null;
   const xml = await fetchTexto("https://myanimelist.net/rss/news.xml");
-  const items = [];
+  const brutas = [];
   const re = /<item>([\s\S]*?)<\/item>/g;
   let m;
   while ((m = re.exec(xml)) !== null) {
@@ -157,14 +190,26 @@ async function noticias() {
     const link = saca("link") || guid;
     let thumb = (bloque.match(/<media:thumbnail>([^<]+)<\/media:thumbnail>/) || [])[1] || "";
     if (!thumb) thumb = (bloque.match(/<media:thumbnail[^>]*url="([^"]+)"/) || [])[1] || "";
+    brutas.push({ titulo: titulo, desc: desc, guid: guid, link: link, thumb: thumb, fecha: saca("pubDate") });
+  }
+  // Título y resumen traducidos en paralelo (la caché evita repetir).
+  await Promise.all(brutas.map(async (b) => {
+    b.tituloEs = await traducirSeguro(b.titulo);
+    b.descEs = b.desc ? await traducirSeguro(b.desc.slice(0, 450)) : "";
+  }));
+  const items = [];
+  for (let i = 0; i < brutas.length; i++) {
+    const b = brutas[i];
+    const traducida = b.tituloEs !== b.titulo;
     items.push({
-      id: "not-" + (guid.replace(/\D+/g, "") || String(items.length)),
-      ref: "noticia:" + items.length,
-      title: titulo,
+      id: "not-" + (b.guid.replace(/\D+/g, "") || String(i)),
+      ref: "noticia:" + i,
+      title: b.tituloEs,
       kind: "movie",
-      poster: thumb.indexOf("https://") === 0 ? thumb : undefined,
-      overview: (desc ? desc.slice(0, 900) : "Sin resumen.") + "\n\nFuente: MyAnimeList News",
-      badges: [haceCuanto(saca("pubDate"))]
+      poster: b.thumb.indexOf("https://") === 0 ? b.thumb : undefined,
+      overview: (b.descEs ? "📰 " + b.descEs : "Sin resumen.") + "\n\n🌐 Leer completa:\n" + b.link +
+        "\n\nFuente: MyAnimeList News" + (traducida ? " · traducción automática" : ""),
+      badges: [haceCuanto(b.fecha)]
     });
   }
   return items;
