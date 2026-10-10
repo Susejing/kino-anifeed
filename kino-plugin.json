@@ -7,7 +7,7 @@
   "icon": "icon.png",
   "description": "Noticias de anime y calendario de emisión semanal con horarios por día, tendencias y próximos estrenos, directo en Kino.",
   "hosts": ["graphql.anilist.co", "myanimelist.net"],
-  "capabilities": ["browse"],
+  "capabilities": ["resolve", "search", "home", "browse"],
   "categories": ["anime"],
   "settings": [
     { "key": "utcOffset", "label": "Zona horaria (UTC)", "type": "text", "hint": "Colombia: -5 · México: -6 · Argentina: -3 · España: 1" }
