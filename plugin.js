@@ -3,7 +3,7 @@
 // emisión, tendencias y próximos estrenos). No necesita tokens ni claves.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.1.2";
+const VERSION = "0.1.4";
 
 // ---------- utilidades ----------
 
@@ -215,26 +215,54 @@ async function noticias() {
     b.tituloEs = await traducirSeguro(b.titulo);
     b.descEs = b.desc ? await traducirSeguro(b.desc.slice(0, 450)) : "";
   }));
+  // Las 12 más recientes se enriquecen con el artículo completo traducido:
+  // es lo que llena la ficha. El resto muestra su resumen. Con caché, esto
+  // solo es pesado la primera vez.
+  await Promise.all(brutas.slice(0, 12).map(async (b) => {
+    b.completo = await articuloCompleto(b.guid.replace(/\D+/g, ""));
+  }));
   const items = [];
   for (let i = 0; i < brutas.length; i++) {
     const b = brutas[i];
-    const traducida = b.tituloEs !== b.titulo;
+    const traducida = b.tituloEs !== b.titulo || !!b.completo;
     const nid = b.guid.replace(/\D+/g, "") || String(i);
     // El resumen ya traducido se guarda para el respaldo del artículo completo.
     try { kino.storage.set("notresumen-es:" + nid, b.descEs || b.desc || "", 172800000); } catch (e2) { /* cache llena */ }
+    const cuerpo = b.completo || b.descEs || "";
     items.push({
       id: "not-" + nid,
       ref: "noticia:" + nid,
       title: b.tituloEs,
-      kind: "series",
+      kind: "movie",
       poster: b.thumb.indexOf("https://") === 0 ? b.thumb : undefined,
-      overview: (b.descEs ? "📰 " + b.descEs : "Sin resumen.") +
-        "\n\n📖 Abre «📰 Leer la noticia completa» para todo el artículo." +
+      overview: (cuerpo ? "📰 " + cuerpo : "Sin resumen.") +
+        "\n\n🌐 Fuente:\n" + b.link +
         "\n\nFuente: MyAnimeList News" + (traducida ? " · traducción automática" : ""),
       badges: [haceCuanto(b.fecha)]
     });
   }
   return items;
+}
+
+// Descarga la página de la noticia y devuelve el artículo completo traducido.
+// Vacío si algo falla (la ficha usa entonces el resumen del RSS).
+async function articuloCompleto(nid) {
+  await null;
+  if (!nid) return "";
+  const cache = kino.storage.get("notart-es:" + nid);
+  if (cache) return cache;
+  try {
+    const html = await fetchTexto("https://myanimelist.net/news/" + nid);
+    const cuerpo = extraerArticulo(html);
+    if (cuerpo.length >= 300) {
+      const trad = await traducirLargo(cuerpo);
+      try { kino.storage.set("notart-es:" + nid, trad, 172800000); } catch (e2) { /* cache llena */ }
+      return trad;
+    }
+  } catch (e) {
+    kino.log("artículo falló:", e.code || e.message);
+  }
+  return "";
 }
 
 // Extrae el texto del artículo completo de la página de la noticia en MAL.
@@ -250,7 +278,7 @@ function extraerArticulo(html) {
         t.indexOf("Terms of Service") >= 0 || t.indexOf("advertis") >= 0) continue;
     paras.push(t);
   }
-  return paras.join("\n\n").slice(0, 6000);
+  return paras.join("\n\n").slice(0, 2500);
 }
 
 // ---------- Categorías (las pestañas de días, como en la app de la captura) ----------
