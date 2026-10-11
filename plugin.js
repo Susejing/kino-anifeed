@@ -3,7 +3,7 @@
 // emisión, tendencias y próximos estrenos). No necesita tokens ni claves.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.1.4";
+const VERSION = "0.1.5";
 
 // ---------- utilidades ----------
 
@@ -104,8 +104,13 @@ async function listaAnime(filtro, pagina) {
   return (d.Page && d.Page.media) || [];
 }
 
-function itemAnime(m) {
+// Ficha de un anime. La sinopsis (en inglés en AniList) se traduce al
+// español; si la traducción falla, queda el original.
+async function itemAnime(m) {
+  await null;
   const titulo = (m.title && (m.title.romaji || m.title.english)) || "Sin título";
+  const sinopsis = limpiarHTML(m.description).slice(0, 450);
+  const sinopsisEs = sinopsis ? await traducirSeguro(sinopsis) : "";
   return {
     id: "al" + m.id,
     ref: "anime:" + m.id,
@@ -113,19 +118,21 @@ function itemAnime(m) {
     kind: "movie",
     year: m.startDate && m.startDate.year ? m.startDate.year : undefined,
     poster: m.coverImage && m.coverImage.extraLarge ? m.coverImage.extraLarge : undefined,
-    overview: "Sinopsis:\n" + (limpiarHTML(m.description).slice(0, 900) || "Sin descripción."),
+    overview: sinopsisEs ? "Sinopsis:\n" + sinopsisEs : "Sinopsis:\nSin descripción.",
     genres: (m.genres || []).slice(0, 5),
     rating: m.averageScore ? Math.round(m.averageScore) / 10 : undefined
   };
 }
 
-// Un anime con su episodio y hora de emisión, con la info visible en la ficha.
-function itemEmision(e) {
-  const base = itemAnime(e.media);
+// Un anime con su episodio y hora de emisión, con la info visible y ordenada.
+async function itemEmision(e) {
+  await null;
+  const base = await itemAnime(e.media);
   base.badges = ["Ep " + e.episode, horaLocal(e.airingAt)];
-  base.overview = "📺 Episodio " + e.episode + " se emite el " + fechaLocal(e.airingAt) +
-    " a las " + horaLocal(e.airingAt) + " (UTC" + (offsetUTC() >= 0 ? "+" : "") + offsetUTC() + ").\n\n" +
-    base.overview;
+  base.overview = "📺 Episodio " + e.episode + " de " + (e.media.episodes || "?") +
+    "\n🕰️ " + fechaLocal(e.airingAt).charAt(0).toUpperCase() + fechaLocal(e.airingAt).slice(1) +
+    " a las " + horaLocal(e.airingAt) + " (UTC" + (offsetUTC() >= 0 ? "+" : "") + offsetUTC() + ")" +
+    "\n\n" + base.overview;
   return base;
 }
 
@@ -310,7 +317,7 @@ export async function home() {
         id: "hoy",
         title: "Hoy en emisión",
         genre: "anime",
-        items: hoy.map(itemEmision).slice(0, 30),
+        items: (await Promise.all(hoy.map(itemEmision))).slice(0, 30),
         ref: "emision:hoy"
       });
     }
@@ -334,7 +341,7 @@ export async function home() {
         id: "tendencias",
         title: "En tendencia",
         genre: "anime",
-        items: t.map(itemAnime).slice(0, 20),
+        items: (await Promise.all(t.map(itemAnime))).slice(0, 20),
         ref: "tendencias"
       });
     }
@@ -346,7 +353,7 @@ export async function home() {
         id: "proximos",
         title: "Próximos estrenos",
         genre: "anime",
-        items: p.map(itemAnime).slice(0, 20),
+        items: (await Promise.all(p.map(itemAnime))).slice(0, 20),
         ref: "proximos"
       });
     }
@@ -367,14 +374,15 @@ export async function browse(ref, cursor) {
       ? "sort: TRENDING_DESC"
       : "status: NOT_YET_RELEASED, sort: POPULARITY_DESC";
     const medios = await listaAnime(filtro, pagina);
+    const items = await Promise.all(medios.map(itemAnime));
     if (medios.length >= 30) {
-      return { items: medios.map(itemAnime), next: String(pagina + 1) };
+      return { items: items, next: String(pagina + 1) };
     }
-    return { items: medios.map(itemAnime) };
+    return { items: items };
   }
   if (ref === "emision:hoy") {
     const es = await emisiones(inicioDia(0), inicioDia(1) - 1);
-    return { items: es.map(itemEmision) };
+    return { items: await Promise.all(es.map(itemEmision)) };
   }
   if (ref.indexOf("emision:") === 0) {
     const n = parseInt(ref.slice(9), 10);
@@ -382,7 +390,7 @@ export async function browse(ref, cursor) {
       const hoy = diaSemanaLocal();
       const delta = (n - hoy + 7) % 7;
       const es = await emisiones(inicioDia(delta), inicioDia(delta + 1) - 1);
-      return { items: es.map(itemEmision) };
+      return { items: await Promise.all(es.map(itemEmision)) };
     }
   }
   return { items: [] };
@@ -396,7 +404,7 @@ export async function search(query) {
     "query ($s: String) { Page(perPage: 20) { media(search: $s, type: ANIME, isAdult: false) { " + QMEDIA + " } } }",
     { s: query.q }
   );
-  return ((d.Page && d.Page.media) || []).map(itemAnime);
+  return await Promise.all(((d.Page && d.Page.media) || []).map(itemAnime));
 }
 
 // ---------- Episodios: la noticia completa ----------
