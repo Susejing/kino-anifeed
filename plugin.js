@@ -1,3 +1,19 @@
+// AniFeed — noticias de anime y calendario de emisión para Kino · github.com/Susejing/kino-anifeed
+// Copyright (C) 2026 Susejing
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 // AniFeed: noticias de anime y calendario de emisión semanal, directo en la
 // Home de Kino. Datos de MyAnimeList (RSS de noticias) y AniList (horarios de
 // emisión, tendencias y próximos estrenos). No necesita tokens ni claves.
@@ -456,3 +472,4 @@ export async function resolve(ref) {
   await null;
   throw kino.error("not_found", "sin video", { userMessage: "Esta ficha es informativa, no tiene video." });
 }
+
